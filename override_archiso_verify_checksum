@@ -1,0 +1,11 @@
+_verify_checksum() {
+    msg "Verify checksum: ${sha512sum}"
+    local _status
+    cd "/run/archiso/bootmnt/${archisobasedir}/${arch}"
+    actual_sum="$(sha512sum airootfs.sfs | awk '{print $1}')"
+    cd "${OLDPWD}"
+    if [ "${actual_sum}" != "${sha512sum}" ]; then
+        return 1
+    fi
+    return 0
+}

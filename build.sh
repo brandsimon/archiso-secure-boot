@@ -12,6 +12,12 @@ work_dir=work
 out_dir=out
 gpg_key=
 
+SPLASH="/usr/share/systemd/bootctl/splash-arch.bmp"
+KEY_DIR="/root/secure-boot"
+KEYFILE="DB.key"
+CRTFILE="DB.crt"
+EFISTUB="/usr/lib/systemd/boot/efi/linuxx64.efi.stub"
+
 verbose=""
 script_path=$(readlink -f ${0%/*})
 
@@ -72,6 +78,8 @@ make_packages() {
 # Copy mkinitcpio archiso hooks and build initramfs (airootfs)
 make_setup_mkinitcpio() {
     local _hook
+    # Disable interactive shell for security reasens
+    cat override_interactive_shell >> "${work_dir}/x86_64/airootfs//usr/lib/initcpio/init_functions"
     mkdir -p ${work_dir}/x86_64/airootfs/etc/initcpio/hooks
     mkdir -p ${work_dir}/x86_64/airootfs/etc/initcpio/install
     for _hook in archiso archiso_shutdown archiso_pxe_common archiso_pxe_nbd archiso_pxe_http archiso_pxe_nfs archiso_loop_mnt; do
@@ -82,6 +90,8 @@ make_setup_mkinitcpio() {
     cp /usr/lib/initcpio/install/archiso_kms ${work_dir}/x86_64/airootfs/etc/initcpio/install
     cp /usr/lib/initcpio/archiso_shutdown ${work_dir}/x86_64/airootfs/etc/initcpio
     cp ${script_path}/mkinitcpio.conf ${work_dir}/x86_64/airootfs/etc/mkinitcpio-archiso.conf
+    # Override function to use kernel parameter checksum
+    cat override_archiso_verify_checksum >> "${work_dir}/x86_64/airootfs/etc/initcpio/hooks/archiso"
     gnupg_fd=
     if [[ ${gpg_key} ]]; then
       gpg --export ${gpg_key} >${work_dir}/gpgkey
@@ -169,7 +179,7 @@ make_efi() {
 # Prepare efiboot.img::/EFI for "El Torito" EFI boot mode
 make_efiboot() {
     mkdir -p ${work_dir}/iso/EFI/archiso
-    truncate -s 64M ${work_dir}/iso/EFI/archiso/efiboot.img
+    truncate -s 100M ${work_dir}/iso/EFI/archiso/efiboot.img
     mkfs.fat -n ARCHISO_EFI ${work_dir}/iso/EFI/archiso/efiboot.img
 
     mkdir -p ${work_dir}/efiboot
@@ -183,10 +193,12 @@ make_efiboot() {
     cp ${work_dir}/iso/${install_dir}/boot/amd_ucode.img ${work_dir}/efiboot/EFI/archiso/amd_ucode.img
 
     mkdir -p ${work_dir}/efiboot/EFI/boot
-    cp ${work_dir}/x86_64/airootfs/usr/share/efitools/efi/PreLoader.efi ${work_dir}/efiboot/EFI/boot/bootx64.efi
     cp ${work_dir}/x86_64/airootfs/usr/share/efitools/efi/HashTool.efi ${work_dir}/efiboot/EFI/boot/
+    # TODO Add entry for Hashtool
 
-    cp ${work_dir}/x86_64/airootfs/usr/lib/systemd/boot/efi/systemd-bootx64.efi ${work_dir}/efiboot/EFI/boot/loader.efi
+    cp ${work_dir}/x86_64/airootfs/usr/lib/systemd/boot/efi/systemd-bootx64.efi ${work_dir}/efiboot/EFI/boot/bootx64.efi
+    sbsign --key "${KEY_DIR}/${KEYFILE}" --cert "${KEY_DIR}/${CRTFILE}" \
+        --output "${work_dir}/efiboot/EFI/boot/bootx64.efi" "${work_dir}/efiboot/EFI/boot/bootx64.efi"
 
     mkdir -p ${work_dir}/efiboot/loader/entries
     cp ${script_path}/efiboot/loader/loader.conf ${work_dir}/efiboot/loader/
@@ -194,6 +206,35 @@ make_efiboot() {
     sed "s|%ARCHISO_LABEL%|${iso_label}|g;
          s|%INSTALL_DIR%|${install_dir}|g" \
         ${script_path}/efiboot/loader/entries/archiso-x86_64-cd.conf > ${work_dir}/efiboot/loader/entries/archiso-x86_64.conf
+    cp "${script_path}/efiboot/loader/entries/archiso-x86_64-signed.conf" \
+        "${work_dir}/efiboot/loader/entries/archiso-x86_64-signed.conf"
+
+    cp ${work_dir}/iso/${install_dir}/boot/x86_64/vmlinuz ${work_dir}/efiboot/EFI/archiso/vmlinuz.efi
+    cp ${work_dir}/iso/${install_dir}/boot/x86_64/archiso.img ${work_dir}/efiboot/EFI/archiso/archiso.img
+
+    cp ${work_dir}/iso/${install_dir}/boot/intel_ucode.img ${work_dir}/efiboot/EFI/archiso/intel_ucode.img
+    cp ${work_dir}/iso/${install_dir}/boot/amd_ucode.img ${work_dir}/efiboot/EFI/archiso/amd_ucode.img
+    local merged_initrd="${work_dir}/initrd"
+    cat "${work_dir}/iso/${install_dir}/boot/intel_ucode.img" "${work_dir}/iso/${install_dir}/boot/amd_ucode.img" \
+        "${work_dir}/iso/${install_dir}/boot/x86_64/archiso.img" > "${merged_initrd}"
+    shasum="$(cat "${work_dir}/iso/arch/x86_64/airootfs.sha512" | awk '{print $1}')"
+    local cmdline="${work_dir}/cmdline"
+    # Embed sha512sum in commandline parameters, so it gets signed with the secureboot key
+    echo "options archisobasedir=${install_dir} archisolabel=${iso_label} verify=y checksum=y sha512sum=${shasum}" \
+        > "${cmdline}"
+    local os_rel="${work_dir}/x86_64/airootfs/etc/os-release"
+    local image="${work_dir}/iso/${install_dir}/boot/x86_64/vmlinuz"
+    local output="${work_dir}/efiboot/EFI/archiso/vmlinuz-signed.efi"
+
+    objcopy \
+        --add-section .osrel="${os_rel}"         --change-section-vma .osrel=0x20000    \
+        --add-section .cmdline="${cmdline}"      --change-section-vma .cmdline=0x30000  \
+        --add-section .splash="${SPLASH}"        --change-section-vma .splash=0x40000   \
+        --add-section .linux="${image}"          --change-section-vma .linux=0x2000000  \
+        --add-section .initrd="${merged_initrd}" --change-section-vma .initrd=0x3000000 \
+        "${EFISTUB}" "${output}"
+    sbsign --key "${KEY_DIR}/${KEYFILE}" --cert "${KEY_DIR}/${CRTFILE}" \
+        --output "${output}" "${output}"
 
     umount -d ${work_dir}/efiboot
 }
@@ -242,13 +283,13 @@ mkdir -p ${work_dir}
 run_once make_pacman_conf
 run_once make_basefs
 run_once make_packages
-run_once make_setup_mkinitcpio
 run_once make_customize_airootfs
+run_once make_setup_mkinitcpio
 run_once make_boot
 run_once make_boot_extra
 run_once make_syslinux
 run_once make_isolinux
+run_once make_prepare
 run_once make_efi
 run_once make_efiboot
-run_once make_prepare
 run_once make_iso

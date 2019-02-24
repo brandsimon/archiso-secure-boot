@@ -23,4 +23,6 @@ systemctl enable pacman-init.service choose-mirror.service
 systemctl set-default multi-user.target
 
 echo "Enter password for root"
-passwd root
+while ! passwd root; do
+    echo "Enter password for root"
+done

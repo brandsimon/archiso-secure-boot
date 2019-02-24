@@ -1,0 +1,7 @@
+# patch interactive shell
+# TODO: Add authentication in initramfs
+launch_interactive_shell() {
+    msg "Something went wrong. interactive shell is disabled for security reasons"
+    sleep 15
+    exit 1
+}
