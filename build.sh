@@ -2,6 +2,14 @@
 
 set -e -u
 
+SPLASH="/usr/share/systemd/bootctl/splash-arch.bmp"
+KEY_DIR="/root/secure-boot"
+KEYFILE="DB.key"
+CRTFILE="DB.crt"
+EFISTUB="/usr/lib/systemd/boot/efi/linuxx64.efi.stub"
+GPG_KEY=
+. config
+
 iso_name=archlinux
 iso_label="ARCH_$(date +%Y%m)"
 iso_publisher="Yourself"
@@ -10,13 +18,7 @@ iso_version=$(date +%Y.%m.%d)
 install_dir=arch
 work_dir=work
 out_dir=out
-gpg_key=
-
-SPLASH="/usr/share/systemd/bootctl/splash-arch.bmp"
-KEY_DIR="/root/secure-boot"
-KEYFILE="DB.key"
-CRTFILE="DB.crt"
-EFISTUB="/usr/lib/systemd/boot/efi/linuxx64.efi.stub"
+gpg_key="${GPG_KEY}"
 
 verbose=""
 script_path=$(readlink -f ${0%/*})

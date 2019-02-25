@@ -1,0 +1,6 @@
+# SPLASH="/usr/share/systemd/bootctl/splash-arch.bmp"
+# KEY_DIR="/root/secure-boot"
+# KEYFILE="DB.key"
+# CRTFILE="DB.crt"
+# EFISTUB="/usr/lib/systemd/boot/efi/linuxx64.efi.stub"
+# GPG_KEY=
