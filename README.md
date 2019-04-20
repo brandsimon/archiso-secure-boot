@@ -2,6 +2,12 @@
 
 This tool allows you to sign an archiso with your secure-boot key.
 
+## Dependencies
+
+You need to install these dependencies first:
+
+	pacman -S binutils sbsigntools archiso
+
 ## Build
 
 You can easily build a signed iso with running the following command:
